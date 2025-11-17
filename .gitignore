@@ -1,0 +1,24 @@
+# Rust
+/target
+
+# eBPF build artifacts
+/build
+*.bpf.o
+*.skel.rs
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Nix
+result
+result-*
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
