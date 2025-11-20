@@ -6,6 +6,9 @@
 *.bpf.o
 *.skel.rs
 
+# vmlinux
+/src-bpf/vmlinux.h
+
 # Editor/IDE
 .vscode/
 .idea/
