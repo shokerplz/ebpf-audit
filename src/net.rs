@@ -7,6 +7,7 @@ use libbpf_rs::RingBufferBuilder;
 use libbpf_rs::skel::OpenSkel as _;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder as _;
+use log::{info, warn};
 use std::mem::ManuallyDrop;
 use std::mem::MaybeUninit;
 use std::time::Duration;
@@ -61,13 +62,13 @@ impl<'obj> SocketConnectProgram<'obj> {
 
     fn callback(data: &[u8]) -> i32 {
         if data.len() < 160 {
-            println!("Data with wrong size was sent to ring buffer");
+            warn!("Data with wrong size was sent to ring buffer");
             return 0;
         }
         let event = unsafe { &*(data.as_ptr() as *const SocketEvent) };
         let comm = unsafe { std::ffi::CStr::from_ptr(event.comm.as_ptr()) };
         let exe = unsafe { std::ffi::CStr::from_ptr(event.exe.as_ptr()) };
-        println!(
+        info!(
             "[{}] PID:{} Exe:{:?} Comm:{:?} DST_IP:{}.{}.{}.{}",
             event.timestamp,
             event.pid,
