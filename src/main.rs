@@ -4,13 +4,16 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use env_logger::Env;
 use std::time::Duration;
 use tokio::signal;
 
 mod data;
 mod file;
 mod net;
+use env_logger;
 use file::TraceOpenProgram;
+use log::info;
 use net::SocketConnectProgram;
 
 // Needed for versions less than 5.17
@@ -29,6 +32,10 @@ fn bump_memlock_rlimit() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Stdout)
+        .init();
+
     let _ = bump_memlock_rlimit();
 
     let file_prog = TraceOpenProgram::new()
@@ -44,7 +51,7 @@ async fn main() -> Result<()> {
 
     tokio::select! {
         _ = signal::ctrl_c() => {
-            println!("Ctrl+C was pressed. Shutting down");
+            info!("Ctrl+C was pressed. Shutting down");
         }
     }
 
