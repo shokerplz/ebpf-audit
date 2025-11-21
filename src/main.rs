@@ -5,6 +5,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use env_logger::Env;
+use tokio_rusqlite::{Connection};
 use std::time::Duration;
 use tokio::signal;
 
@@ -32,17 +33,31 @@ fn bump_memlock_rlimit() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let conn = Connection::open("result.db").await?;
+
+    conn.call(|c| {
+        let result1 = c.execute("create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, exe))", [],);
+        let result2 = c.execute("create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, exe))", [],);
+        if result1.is_err() {
+            return result1;
+        }
+        if result2.is_err() {
+            return result2;
+        }
+        Ok(0)
+    }).await?;
+
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .target(env_logger::Target::Stdout)
         .init();
 
-    let _ = bump_memlock_rlimit();
+    let _ = bump_memlock_rlimit().expect("Failed to set rlimit");
 
-    let file_prog = TraceOpenProgram::new()
+    let file_prog = TraceOpenProgram::new(conn.clone())
         .context("Failed to initialize trace open bpf")
         .unwrap();
 
-    let net_prog = SocketConnectProgram::new()
+    let net_prog = SocketConnectProgram::new(conn.clone())
         .context("Failed to initialize socket connect bpf")
         .unwrap();
 

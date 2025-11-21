@@ -6,4 +6,4 @@
 const volatile int ENABLE_DEBUG = 1;
 
 /// @description "PID to filter"
-const volatile int PID_TARGET = 0;
+const volatile pid_t PID_TARGET = 0;

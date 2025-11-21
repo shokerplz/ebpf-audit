@@ -7,10 +7,12 @@ use libbpf_rs::RingBufferBuilder;
 use libbpf_rs::skel::OpenSkel as _;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder as _;
-use log::{info, warn};
+use log::{warn, error};
 use std::mem::ManuallyDrop;
 use std::mem::MaybeUninit;
 use std::time::Duration;
+use tokio_rusqlite::Connection;
+use rusqlite::params;
 
 use crate::data::*;
 
@@ -23,10 +25,12 @@ use exec_skel::*;
 pub struct SocketConnectProgram<'obj> {
     ringbuf: libbpf_rs::RingBuffer<'obj>,
     _skel: ManuallyDrop<SocketConnectSkel<'obj>>,
+    db_conn: Connection,
+    rx: tokio::sync::mpsc::UnboundedReceiver<RustSocketEvent>,
 }
 
 impl<'obj> SocketConnectProgram<'obj> {
-    pub fn new() -> Result<Self> {
+    pub fn new(db_conn: Connection) -> Result<Self> {
         let skel_builder = SocketConnectSkelBuilder::default();
         let mut open_object = Box::new(MaybeUninit::uninit());
         let skel = {
@@ -48,47 +52,57 @@ impl<'obj> SocketConnectProgram<'obj> {
 
         let mut builder = RingBufferBuilder::new();
 
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<RustSocketEvent>();
+
+        let callback = move |data: &[u8]| -> i32 {
+            if data.len() < std::mem::size_of::<SocketEvent>() {
+                warn!("Data with wrong size was sent to ring buffer");
+                return 0;
+            }
+            let event = unsafe { &*(data.as_ptr() as *const SocketEvent) };
+            let comm = unsafe { std::ffi::CStr::from_ptr(event.comm.as_ptr()) }.to_string_lossy().into_owned();
+            let exe = unsafe { std::ffi::CStr::from_ptr(event.exe.as_ptr()) }.to_string_lossy().into_owned();
+            let dst_ip: String = format!("{}.{}.{}.{}", event.dst_ip[0], event.dst_ip[1], event.dst_ip[2], event.dst_ip[3]);
+
+            let new_event = RustSocketEvent {
+                timestamp: event.timestamp,
+                pid: event.pid,
+                comm,
+                exe,
+                dst_ip
+            };
+
+            let _ = tx.send(new_event);
+            0
+        };
+
         builder
-            .add(&skel.maps.events, Self::callback)
+            .add(&skel.maps.events, callback)
             .context("Failed to attach callback to Ringbuffer")?;
         let ringbuf = builder.build().context("Failed to build Ringbuffer")?;
 
         Ok(Self {
-            //            open_object,
             ringbuf,
             _skel: skel,
+            db_conn,
+            rx
         })
     }
 
-    fn callback(data: &[u8]) -> i32 {
-        if data.len() < 160 {
-            warn!("Data with wrong size was sent to ring buffer");
-            return 0;
-        }
-        let event = unsafe { &*(data.as_ptr() as *const SocketEvent) };
-        let comm = unsafe { std::ffi::CStr::from_ptr(event.comm.as_ptr()) };
-        let exe = unsafe { std::ffi::CStr::from_ptr(event.exe.as_ptr()) };
-        info!(
-            "[{}] PID:{} Exe:{:?} Comm:{:?} DST_IP:{}.{}.{}.{}",
-            event.timestamp,
-            event.pid,
-            exe,
-            comm,
-            event.dst_ip[0],
-            event.dst_ip[1],
-            event.dst_ip[2],
-            event.dst_ip[3]
-        );
-        0
-    }
-
-    pub async fn poll(self, timeout: Duration) {
+    pub async fn poll(mut self, timeout: Duration) {
         loop {
-            // Not sure about context here since we're not returning any value
             let _ = self
                 .ringbuf
                 .poll(timeout)
                 .context("Failed to poll Ringbuffer");
+            while let Ok(event) = self.rx.try_recv() {
+                let res = self.db_conn.call(move |c| {
+                    c.execute("INSERT INTO sockets_opened (timestamp, pid, comm, exe, dst_ip) VALUES (?1, ?2, ?3, ?4, ?5)", params![event.timestamp, event.pid, event.comm, event.exe, event.dst_ip])
+                }).await;
+                if let Err(res) = res {
+                    error!("Failed to write to DB: {}", res);
+                }
+            }
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
     }
