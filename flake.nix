@@ -43,6 +43,7 @@
             cargo
             rustfmt
             rust-src
+            rust-analyzer
           ]
         );
     };
@@ -64,7 +65,6 @@
             cargo-deny
             cargo-edit
             cargo-watch
-            rust-analyzer
             libllvm
             cargo-generate
 
@@ -76,6 +76,7 @@
             bpf-linker
             elfutils
             gdb
+            sqlite
           ];
 
           env = {

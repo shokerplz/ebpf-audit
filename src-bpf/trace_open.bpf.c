@@ -25,6 +25,12 @@ SEC("lsm/file_open")
 int BPF_PROG(trace_file_open, struct file *file)
 {
 
+    if (PID_TARGET) {
+      if (PID_TARGET == bpf_get_current_pid_tgid() >> 32) {
+        return 0;
+      }
+    }
+
     struct file_open_event *event = bpf_ringbuf_reserve(&events, sizeof(struct file_open_event), 0);
     if (!event) {
       return 0;
