@@ -1,89 +1,154 @@
 // SPDX-License-Identifier: GPL-3.0
 // Copyright (C) 2025 ebpf-audit Ivan Kovalev ivan@ikovalev.nl
 
+use crate::data::*;
 use anyhow::Context;
 use anyhow::Result;
-use libbpf_rs::RingBufferBuilder;
+use exec_skel::*;
 use libbpf_rs::skel::OpenSkel as _;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder as _;
-use log::{info, warn};
-use std::mem::ManuallyDrop;
+use libbpf_rs::RingBufferBuilder;
+use log::{debug, error, warn};
+use rusqlite::params;
+use std::mem;
 use std::mem::MaybeUninit;
+use std::process;
 use std::time::Duration;
+use tokio_rusqlite::Connection;
 
-use crate::data::*;
+const MAX_EVENTS: usize = 16384;
+const BATCH_SIZE: usize = 1024;
 
 mod exec_skel {
     include!(concat!(env!("OUT_DIR"), "/trace_open_skel.rs"));
 }
 
-use exec_skel::*;
-
-pub struct TraceOpenProgram<'obj> {
-    ringbuf: libbpf_rs::RingBuffer<'obj>,
-    _skel: ManuallyDrop<TraceOpenSkel<'obj>>,
+pub struct TraceOpenProgram {
+    ringbuf: libbpf_rs::RingBuffer<'static>,
+    _skel: &'static mut TraceOpenSkel<'static>,
+    db_conn: Connection,
+    rx: tokio::sync::mpsc::Receiver<RustFileEvent>,
 }
 
-impl<'obj> TraceOpenProgram<'obj> {
-    pub fn new() -> Result<Self> {
-        let skel_builder = TraceOpenSkelBuilder::default();
-        let mut open_object = Box::new(MaybeUninit::uninit());
-        let skel = {
-            let open_skel = skel_builder
-                .open(&mut *open_object)
-                .context("Failed to open skel")?;
-            let mut skel = ManuallyDrop::new(open_skel.load().context("Failed to load skel")?);
-            skel.attach().context("Failed to attach skel")?;
-            // Unfortunately due to the fact that rust is so notorious about lifetimes
-            // I have to use this black magic to cast normal type into a static one
-            // Without that it just wouldn't work. Probably it's safe tho
-            unsafe {
-                std::mem::transmute::<
-                    ManuallyDrop<TraceOpenSkel<'_>>,
-                    ManuallyDrop<TraceOpenSkel<'static>>,
-                >(skel)
+async fn write_batch(db_conn: &Connection, batch: &mut Vec<RustFileEvent>) {
+    if batch.is_empty() {
+        return;
+    }
+
+    debug!("Writing batch of {} file events to DB", batch.len());
+    let db_batch = mem::take(batch);
+    let res = db_conn
+        .call(move |c| {
+            let tx = c.transaction()?;
+            for event in &db_batch {
+                tx.execute(
+                    "INSERT INTO files_opened (timestamp, pid, comm, exe, path) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![event.timestamp, event.pid, &event.comm, &event.exe, &event.path],
+                )?;
             }
-        };
+            tx.commit()
+        })
+        .await;
+
+    if let Err(res) = res {
+        error!("Failed to write batch to DB: {}", res);
+    }
+}
+
+impl TraceOpenProgram {
+    pub fn new(db_conn: Connection) -> Result<Self> {
+        let skel_builder = TraceOpenSkelBuilder::default();
+        let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
+        let open_skel = skel_builder
+            .open(open_object)
+            .context("Failed to open skel")?;
+
+        open_skel.maps.rodata_data.PID_TARGET = process::id() as i32;
+
+        let mut skel = open_skel.load().context("Failed to load skel")?;
+        skel.attach().context("Failed to attach skel")?;
+        let skel = Box::leak(Box::new(skel));
 
         let mut builder = RingBufferBuilder::new();
 
+        let (tx, rx) = tokio::sync::mpsc::channel::<RustFileEvent>(MAX_EVENTS);
+
+        let callback = move |data: &[u8]| -> i32 {
+            if data.len() < std::mem::size_of::<FileEvent>() {
+                warn!("Data with wrong size was sent to ring buffer");
+                return 0;
+            }
+            let event = unsafe { &*(data.as_ptr() as *const FileEvent) };
+            let comm = unsafe { std::ffi::CStr::from_ptr(event.comm.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            let exe = unsafe { std::ffi::CStr::from_ptr(event.exe.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            let path = unsafe { std::ffi::CStr::from_ptr(event.path.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+
+            let new_event = RustFileEvent {
+                timestamp: event.timestamp,
+                pid: event.pid,
+                comm,
+                exe,
+                path,
+            };
+
+            if tx.try_send(new_event).is_err() {
+                warn!("Failed to send event to channel, buffer is full");
+            }
+            0
+        };
+
         builder
-            .add(&skel.maps.events, Self::callback)
+            .add(&skel.maps.events, callback)
             .context("Failed to attach callback to Ringbuffer")?;
         let ringbuf = builder.build().context("Failed to build Ringbuffer")?;
 
         Ok(Self {
-            //            open_object,
             ringbuf,
             _skel: skel,
+            db_conn,
+            rx,
         })
     }
 
-    fn callback(data: &[u8]) -> i32 {
-        if data.len() < 288 {
-            warn!("Data with wrong size was sent to ring buffer");
-            return 0;
-        }
-        let event = unsafe { &*(data.as_ptr() as *const FileEvent) };
-        let comm = unsafe { std::ffi::CStr::from_ptr(event.comm.as_ptr()) };
-        let exe = unsafe { std::ffi::CStr::from_ptr(event.exe.as_ptr()) };
-        let path = unsafe { std::ffi::CStr::from_ptr(event.path.as_ptr()) };
-        info!(
-            "[{}] PID:{} Exe:{:?} Comm:{:?} Path: {:?}",
-            event.timestamp, event.pid, exe, comm, path
-        );
-        0
-    }
+    pub async fn poll(
+        mut self,
+        timeout: Duration,
+        mut shutdown_rx: tokio::sync::watch::Receiver<()>,
+    ) {
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        let batch_timeout = Duration::from_millis(500);
 
-    pub async fn poll(self, timeout: Duration) {
         loop {
-            // Not sure about context here since we're not returning any value
-            let _ = self
-                .ringbuf
-                .poll(timeout)
-                .context("Failed to poll Ringbuffer");
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            if let Err(e) = self.ringbuf.poll(timeout) {
+                error!("Failed to poll ring buffer: {}", e);
+            }
+
+            while let Ok(event) = self.rx.try_recv() {
+                batch.push(event);
+                if batch.len() >= BATCH_SIZE {
+                    write_batch(&self.db_conn, &mut batch).await;
+                }
+            }
+
+            tokio::select! {
+                biased;
+                _ = shutdown_rx.changed() => {
+                    if !batch.is_empty() {
+                        write_batch(&self.db_conn, &mut batch).await;
+                    }
+                    break;
+                }
+                _ = tokio::time::sleep(batch_timeout), if !batch.is_empty() => {
+                    write_batch(&self.db_conn, &mut batch).await;
+                }
+            }
         }
     }
 }

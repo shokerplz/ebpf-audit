@@ -31,10 +31,6 @@ int BPF_PROG(inspect_connect, struct socket *sock, struct sockaddr *address, int
   if (!event) {
     return 0;
   }
-
-  char exe_path[MAX_PATH_LEN] = "<unknown>";
-  char comm[TASK_COMM_LEN] = "<unknown>";
-  char open_path[MAX_PATH_LEN] = "<unknown>";
   
   event->timestamp = bpf_ktime_get_ns();
 
