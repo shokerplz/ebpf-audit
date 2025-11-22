@@ -41,11 +41,11 @@ async fn main() -> Result<()> {
     conn.call(|c| {
         let tx = c.transaction()?;
         tx.execute(
-            "create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, exe))",
+            "create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, path))",
             [],
         )?;
         tx.execute(
-            "create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, exe))",
+            "create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, dst_ip))",
             [],
         )?;
         tx.commit()
