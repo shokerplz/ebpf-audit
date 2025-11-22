@@ -9,10 +9,9 @@ use libbpf_rs::skel::OpenSkel as _;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder as _;
 use libbpf_rs::RingBufferBuilder;
-use log::{info, debug, error, warn};
+use log::{debug, error, warn};
 use rusqlite::params;
 use std::mem;
-use std::mem::ManuallyDrop;
 use std::mem::MaybeUninit;
 use std::process;
 use std::time::Duration;
@@ -25,9 +24,9 @@ mod exec_skel {
     include!(concat!(env!("OUT_DIR"), "/trace_open_skel.rs"));
 }
 
-pub struct TraceOpenProgram<'obj> {
-    ringbuf: libbpf_rs::RingBuffer<'obj>,
-    _skel: ManuallyDrop<TraceOpenSkel<'obj>>,
+pub struct TraceOpenProgram {
+    ringbuf: libbpf_rs::RingBuffer<'static>,
+    _skel: &'static mut TraceOpenSkel<'static>,
     db_conn: Connection,
     rx: tokio::sync::mpsc::Receiver<RustFileEvent>,
 }
@@ -57,29 +56,19 @@ async fn write_batch(db_conn: &Connection, batch: &mut Vec<RustFileEvent>) {
     }
 }
 
-impl<'obj> TraceOpenProgram<'obj> {
+impl TraceOpenProgram {
     pub fn new(db_conn: Connection) -> Result<Self> {
         let skel_builder = TraceOpenSkelBuilder::default();
-        let mut open_object = Box::new(MaybeUninit::uninit());
-        let skel = {
-            let open_skel = skel_builder
-                .open(&mut *open_object)
-                .context("Failed to open skel")?;
+        let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
+        let open_skel = skel_builder
+            .open(open_object)
+            .context("Failed to open skel")?;
 
-            open_skel.maps.rodata_data.PID_TARGET = process::id() as i32;
+        open_skel.maps.rodata_data.PID_TARGET = process::id() as i32;
 
-            let mut skel = ManuallyDrop::new(open_skel.load().context("Failed to load skel")?);
-            skel.attach().context("Failed to attach skel")?;
-            // Unfortunately due to the fact that rust is so notorious about lifetimes
-            // I have to use this black magic to cast normal type into a static one
-            // Without that it just wouldn't work. Probably it's safe tho
-            unsafe {
-                std::mem::transmute::<
-                    ManuallyDrop<TraceOpenSkel<'_>>,
-                    ManuallyDrop<TraceOpenSkel<'static>>,
-                >(skel)
-            }
-        };
+        let mut skel = open_skel.load().context("Failed to load skel")?;
+        skel.attach().context("Failed to attach skel")?;
+        let skel = Box::leak(Box::new(skel));
 
         let mut builder = RingBufferBuilder::new();
 
