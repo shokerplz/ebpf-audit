@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0
 // Copyright (C) 2025 ebpf-audit Ivan Kovalev ivan@ikovalev.nl
 
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
-use anyhow::bail;
 use env_logger::Env;
-use tokio_rusqlite::{Connection};
+use file::TraceOpenProgram;
+use log::info;
+use net::SocketConnectProgram;
 use std::time::Duration;
 use tokio::signal;
+use tokio_rusqlite::Connection;
 
 mod data;
 mod file;
 mod net;
-use env_logger;
-use file::TraceOpenProgram;
-use log::info;
-use net::SocketConnectProgram;
 
 // Needed for versions less than 5.17
 fn bump_memlock_rlimit() -> Result<()> {
@@ -33,45 +32,49 @@ fn bump_memlock_rlimit() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let conn = Connection::open("result.db").await?;
-
-    conn.call(|c| {
-        let result1 = c.execute("create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, exe))", [],);
-        let result2 = c.execute("create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, exe))", [],);
-        if result1.is_err() {
-            return result1;
-        }
-        if result2.is_err() {
-            return result2;
-        }
-        Ok(0)
-    }).await?;
-
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .target(env_logger::Target::Stdout)
         .init();
 
-    let _ = bump_memlock_rlimit().expect("Failed to set rlimit");
+    let conn = Connection::open("result.db").await?;
 
-    let file_prog = TraceOpenProgram::new(conn.clone())
-        .context("Failed to initialize trace open bpf")
-        .unwrap();
+    conn.call(|c| {
+        let tx = c.transaction()?;
+        tx.execute(
+            "create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, exe))",
+            [],
+        )?;
+        tx.execute(
+            "create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, exe))",
+            [],
+        )?;
+        tx.commit()
+    })
+    .await?;
 
-    let net_prog = SocketConnectProgram::new(conn.clone())
-        .context("Failed to initialize socket connect bpf")
-        .unwrap();
+    bump_memlock_rlimit()?;
 
-    let trace_open_poller = tokio::spawn(file_prog.poll(Duration::from_millis(100)));
-    let socket_connect_poller = tokio::spawn(net_prog.poll(Duration::from_millis(1000)));
+    let file_prog =
+        TraceOpenProgram::new(conn.clone()).context("Failed to initialize trace open bpf")?;
+
+    let net_prog =
+        SocketConnectProgram::new(conn.clone()).context("Failed to initialize socket connect bpf")?;
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
+
+    let trace_open_poller =
+        tokio::spawn(file_prog.poll(Duration::from_millis(50), shutdown_rx.clone()));
+    let socket_connect_poller =
+        tokio::spawn(net_prog.poll(Duration::from_millis(1000), shutdown_rx.clone()));
 
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("Ctrl+C was pressed. Shutting down");
+            let _ = shutdown_tx.send(());
         }
     }
 
-    trace_open_poller.abort();
-    socket_connect_poller.abort();
+    let _ = tokio::join!(trace_open_poller, socket_connect_poller);
 
     Ok(())
 }
