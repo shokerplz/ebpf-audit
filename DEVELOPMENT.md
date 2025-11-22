@@ -32,12 +32,11 @@ sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./target/debug/ebpf-audit
 
 ## TODO / Future Enhancements
 
-- [ ] SQLite database backend for event storage
+- [x] SQLite database backend for event storage
 - [ ] Event filtering capabilities
 - [ ] Additional protocol support (IPv6, Unix sockets)
 - [ ] Web dashboard for real-time monitoring
-- [ ] Configuration file support
-- [ ] Export to various formats (JSON, CSV, etc.)
+- [ ] Configuration support
 
 ## Architecture Notes
 

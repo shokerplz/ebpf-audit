@@ -153,7 +153,6 @@ ebpf-audit/
 
 ## Future Enhancements
 
-- SQLite database backend for event storage
 - Filtering and search capabilities
 - Web dashboard for visualization
 - Additional event types (process execution, privilege escalation, etc.)
