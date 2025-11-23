@@ -65,26 +65,7 @@ sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./target/debug/ebpf-audit
 
 The program will start monitoring and display events as they occur:
 
-```
-[1234567890] PID:1234 Exe:"/usr/bin/cat" Comm:"cat" Path: "/etc/passwd"
-[1234567891] PID:5678 Exe:"/usr/bin/curl" Comm:"curl" DST_IP:93.184.216.34
-```
-
 Press `Ctrl+C` to stop monitoring gracefully.
-
-Note: piping is currently not supported, at the moment program will crash on pipe closure
-
-## Output Format
-
-### File Events
-```
-[timestamp] PID:<pid> Exe:"<executable_path>" Comm:"<command_name>" Path: "<file_path>"
-```
-
-### Network Events
-```
-[timestamp] PID:<pid> Exe:"<executable_path>" Comm:"<command_name>" DST_IP:<ip_address>
-```
 
 ## How It Works
 
@@ -98,7 +79,7 @@ The project consists of two main components:
    - Loads eBPF programs into the kernel
    - Attaches them to appropriate hook points
    - Polls ring buffers for events
-   - Formats and displays the output
+   - Writes data to sqlite DB in batches
 
 Events are sent from kernel space to user space via eBPF ring buffers for efficient, lock-free communication.
 
@@ -120,43 +101,17 @@ Events are sent from kernel space to user space via eBPF ring buffers for effici
 ┌──────────────┼───────┼──────────────┐
 │              ▼       ▼              │
 │         User Space                  │
-│  ┌─────────────────────────────┐   │
-│  │   Tokio Async Runtime       │   │
-│  │  ┌─────────┐  ┌───────────┐ │   │
-│  │  │File Poll│  │Net Poll   │ │   │
-│  │  └─────────┘  └───────────┘ │   │
-│  └─────────────────────────────┘   │
+│  ┌─────────────────────────────┐    │
+│  │   Tokio Async Runtime       │    │
+│  │  ┌─────────┐  ┌───────────┐ │    │
+│  │  │File Poll│  │Net Poll   │ │    │
+│  │  └─────────┘  └───────────┘ │    │
+│  └─────────────────────────────┘    │
 │              │                      │
 │              ▼                      │
-│         Console Output              │
+│          SQLite DB                  │
 └─────────────────────────────────────┘
 ```
-
-## Project Structure
-
-```
-ebpf-audit/
-├── src/
-│   ├── main.rs           # Main entry point
-│   ├── file.rs           # File monitoring logic
-│   ├── net.rs            # Network monitoring logic
-│   └── data.rs           # Shared data structures
-├── src-bpf/
-│   ├── trace_open.bpf.c      # eBPF file monitoring
-│   ├── socket_connect.bpf.c  # eBPF network monitoring
-│   ├── bpf.h                 # Headers
-├── build.rs              # Build script for eBPF compilation
-├── Cargo.toml
-├── flake.nix            # Nix development environment
-└── README.md
-```
-
-## Future Enhancements
-
-- Filtering and search capabilities
-- Web dashboard for visualization
-- Additional event types (process execution, privilege escalation, etc.)
-- Detecting unusual patterns
 
 ## Security Considerations
 
