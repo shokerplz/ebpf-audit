@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0
 // Copyright (C) 2025 ebpf-audit Ivan Kovalev ivan@ikovalev.nl
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use env_logger::Env;
 use file::TraceOpenProgram;
 use log::info;
@@ -41,11 +41,11 @@ async fn main() -> Result<()> {
     conn.call(|c| {
         let tx = c.transaction()?;
         tx.execute(
-            "create table if not exists files_opened (timestamp integer, pid integer, comm text, exe text, path text, PRIMARY KEY (timestamp, pid, path))",
+            "CREATE TABLE IF NOT EXISTS files_opened (comm text, exe text, path text, PRIMARY KEY (comm, exe, path) ON CONFLICT IGNORE)",
             [],
         )?;
         tx.execute(
-            "create table if not exists sockets_opened (timestamp integer, pid integer, comm text, exe text, dst_ip text, PRIMARY KEY (timestamp, pid, dst_ip))",
+            "CREATE TABLE IF NOT EXISTS sockets_opened (comm text, exe text, dst_ip text, PRIMARY KEY (comm, exe, dst_ip) ON CONFLICT IGNORE)",
             [],
         )?;
         tx.commit()
@@ -57,8 +57,8 @@ async fn main() -> Result<()> {
     let file_prog =
         TraceOpenProgram::new(conn.clone()).context("Failed to initialize trace open bpf")?;
 
-    let net_prog =
-        SocketConnectProgram::new(conn.clone()).context("Failed to initialize socket connect bpf")?;
+    let net_prog = SocketConnectProgram::new(conn.clone())
+        .context("Failed to initialize socket connect bpf")?;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
 
