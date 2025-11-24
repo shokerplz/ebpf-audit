@@ -4,6 +4,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use clap::{Parser, ValueEnum};
 use env_logger::Env;
 use file::TraceOpenProgram;
 use log::info;
@@ -15,6 +16,19 @@ use tokio_rusqlite::Connection;
 mod data;
 mod file;
 mod net;
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Mode {
+    CollectData,
+    Analysys,
+}
+
+#[derive(Parser)]
+struct Args {
+    /// Mode to run program in
+    #[arg(value_enum, long)]
+    mode: Mode,
+}
 
 // Needed for versions less than 5.17
 fn bump_memlock_rlimit() -> Result<()> {
@@ -35,6 +49,17 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .target(env_logger::Target::Stdout)
         .init();
+
+    let args = Args::parse();
+
+    match args.mode {
+        Mode::CollectData => {
+            info!("Starting data collection mode");
+        }
+        Mode::Analysys => {
+            info!("Starting analysys mode");
+        }
+    }
 
     let conn = Connection::open("result.db").await?;
 
