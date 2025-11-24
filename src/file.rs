@@ -5,10 +5,10 @@ use crate::data::*;
 use anyhow::Context;
 use anyhow::Result;
 use exec_skel::*;
+use libbpf_rs::RingBufferBuilder;
 use libbpf_rs::skel::OpenSkel as _;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder as _;
-use libbpf_rs::RingBufferBuilder;
 use log::{debug, error, warn};
 use rusqlite::params;
 use std::mem;
@@ -43,8 +43,8 @@ async fn write_batch(db_conn: &Connection, batch: &mut Vec<RustFileEvent>) {
             let tx = c.transaction()?;
             for event in &db_batch {
                 tx.execute(
-                    "INSERT INTO files_opened (timestamp, pid, comm, exe, path) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![event.timestamp, event.pid, &event.comm, &event.exe, &event.path],
+                    "INSERT INTO files_opened (comm, exe, path) VALUES (?1, ?2, ?3)",
+                    params![&event.comm, &event.exe, &event.path],
                 )?;
             }
             tx.commit()

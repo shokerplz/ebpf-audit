@@ -225,6 +225,7 @@ name = "ebpf-audit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "ctrlc",
  "env_logger",
  "libbpf-cargo",
