@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
     let trace_open_poller =
         tokio::spawn(file_prog.poll(Duration::from_millis(50), args.mode, shutdown_rx.clone()));
     let socket_connect_poller =
-        tokio::spawn(net_prog.poll(Duration::from_millis(10), args.mode, shutdown_rx.clone()));
+        tokio::spawn(net_prog.poll(Duration::from_millis(50), args.mode, shutdown_rx.clone()));
 
     tokio::select! {
         _ = signal::ctrl_c() => {
