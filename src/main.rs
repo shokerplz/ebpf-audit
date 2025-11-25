@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 // Copyright (C) 2025 ebpf-audit Ivan Kovalev ivan@ikovalev.nl
 
+mod macros;
+
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -73,6 +75,8 @@ async fn main() -> Result<()> {
             "CREATE TABLE IF NOT EXISTS sockets_opened (comm text, exe text, dst_ip text, PRIMARY KEY (comm, exe, dst_ip) ON CONFLICT IGNORE)",
             [],
         )?;
+        tx.execute("CREATE INDEX IF NOT EXISTS idx_files_opened_all ON files_opened (comm, exe, path)",[])?;
+        tx.execute("CREATE INDEX IF NOT EXISTS idx_sockets_opened_all ON sockets_opened (comm, exe, dst_ip)", [])?;
         tx.commit()
     })
     .await?;
@@ -88,9 +92,9 @@ async fn main() -> Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
 
     let trace_open_poller =
-        tokio::spawn(file_prog.poll(Duration::from_millis(50), shutdown_rx.clone()));
+        tokio::spawn(file_prog.poll(Duration::from_millis(50), args.mode, shutdown_rx.clone()));
     let socket_connect_poller =
-        tokio::spawn(net_prog.poll(Duration::from_millis(1000), shutdown_rx.clone()));
+        tokio::spawn(net_prog.poll(Duration::from_millis(10), args.mode, shutdown_rx.clone()));
 
     tokio::select! {
         _ = signal::ctrl_c() => {
