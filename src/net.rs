@@ -219,7 +219,7 @@ impl SocketConnectProgram {
                     }
                     break;
                 }
-                _ = tokio::time::sleep(batch_timeout), if !batch.is_empty() => {
+                _ = tokio::time::sleep(batch_timeout) => {
                     match mode {
                         Mode::CollectData => {time_it!("net::write_batch", write_batch(&self.db_conn, &mut batch)).await;}
                         Mode::Analysys => {time_it!("net::check_batch", check_batch(&self.db_conn, &mut batch)).await;}
