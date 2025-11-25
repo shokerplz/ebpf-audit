@@ -13,6 +13,7 @@ pub struct SocketEvent {
     pub dst_ip: [u8; 4],
 }
 
+#[derive(Debug, Clone)]
 pub struct RustSocketEvent {
     pub timestamp: u64,
     pub pid: u32,
@@ -31,6 +32,7 @@ pub struct FileEvent {
     pub path: [c_char; 128],
 }
 
+#[derive(Debug, Clone)]
 pub struct RustFileEvent {
     pub timestamp: u64,
     pub pid: u32,

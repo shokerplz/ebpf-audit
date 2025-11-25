@@ -34,6 +34,7 @@ sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./target/debug/ebpf-audit
 
 - [x] SQLite database backend for event storage
 - [ ] Additional protocol support (IPv6, Unix sockets)
+
 - [ ] Configuration support
 
 ## Architecture Notes

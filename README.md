@@ -5,8 +5,8 @@ A lightweight Linux system monitoring tool built with eBPF that tracks file acce
 ## Overview
 
 `ebpf-audit` uses eBPF (Extended Berkeley Packet Filter) to monitor system activity with minimal overhead. It tracks:
-- **File Operations**: Which processes open which files
-- **Network Connections**: Which processes connect to which IP addresses
+- **File Operations**: Which processes open which files and stores them in a SQLite database.
+- **Network Connections**: Which processes connect to which IP addresses and stores them in a SQLite database.
 
 All monitoring happens in kernel space for maximum efficiency and minimal performance impact.
 
@@ -17,6 +17,7 @@ All monitoring happens in kernel space for maximum efficiency and minimal perfor
 - **Process Details**: Track process ID, executable path, and command name
 - **Asynchronous Processing**: Built with Tokio for efficient event handling
 - **No Dependencies on External Tooling**: Self-contained binary
+- **Data Persistence**: All captured events are stored in a SQLite database for later analysis.
 
 ## Requirements
 
@@ -51,21 +52,27 @@ The build process automatically compiles the eBPF programs and embeds them into 
 
 ## Usage
 
-Run with root privileges:
+Run with root privileges in `CollectData` mode (default, storing events in `result.db`):
 
 ```bash
-sudo ./target/debug/ebpf-audit
+sudo ./target/debug/ebpf-audit --mode collect-data
 ```
 
-If you're using NixOS you would need to run:
-
-```bash
-sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./target/debug/ebpf-audit
-```
-
-The program will start monitoring and display events as they occur:
+The program will start monitoring and store events in `result.db`. Console output will show status messages.
 
 Press `Ctrl+C` to stop monitoring gracefully.
+
+## Analysys Mode
+
+In `Analysys` mode, `ebpf-audit` monitors file access and network connections but instead of writing all events to the database, it compares incoming events against the existing `result.db`. If an event (file open or socket connection) is detected that is *not* already present in the database, it will be logged to the console as a "new event." This mode is useful for detecting unusual or unauthorized activity against a known baseline.
+
+To run in `Analysys` mode:
+
+```bash
+sudo ./target/debug/ebpf-audit --mode analysys
+```
+
+When running in Analysys mode, events are not persisted to the database.
 
 ## How It Works
 
