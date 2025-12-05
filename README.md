@@ -34,6 +34,33 @@ If you're using Nix, a `flake.nix` is provided for easy environment setup:
 nix develop
 ```
 
+### Non-Nix Users
+
+If you don't have Nix installed, you can use the provided Dockerfile to create a consistent development environment.
+
+1. **Build the Docker image:**
+
+```bash
+docker build -t ebpf-audit-dev .
+```
+
+2. **Start the development shell:**
+
+```bash
+docker run --rm -it \
+  -v $(pwd):/app \
+  ebpf-audit-dev
+```
+
+> **Note:** To *run* the `ebpf-audit` binary (which requires kernel privileges), you must run the container with `--privileged`:
+>
+> ```bash
+> docker run --rm -it \
+>   -v $(pwd):/app \
+>   --privileged \
+>   ebpf-audit-dev
+> ```
+
 ## Generate vmlinux
 
 To build BPF binaries you would need to create vmlinux.h first
