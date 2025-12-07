@@ -8,11 +8,7 @@ WORKDIR /app
 
 COPY flake.nix flake.lock ./
 
-RUN mkdir -p src-bpf && touch src-bpf/vmlinux.h
-
 RUN nix develop --command echo "Dependencies installed"
-
-RUN rm src-bpf/vmlinux.h
 
 COPY . .
 
