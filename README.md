@@ -52,6 +52,15 @@ docker run --rm -it \
   ebpf-audit-dev
 ```
 
+3. **Build ebpf-audit:**
+
+```bash
+docker run --rm -it \
+  -v $(pwd):/app \
+  ebpf-audit-dev \
+  cargo build
+```
+
 > **Note:** To *run* the `ebpf-audit` binary (which requires kernel privileges), you must run the container with `--privileged`:
 >
 > ```bash
